@@ -1,0 +1,65 @@
+/* Global wrapper */
+.auth-container {
+  font-family: Arial, sans-serif;
+  background: #f4f4f4;
+  min-height: 100vh;   /* full height */
+  width: 100vw;        /* full width */
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 20px;       /* breathing room */
+  box-sizing: border-box;
+}
+
+/* Form box */
+.auth-form {
+  background: white;
+  padding: 20px;
+  max-width: 400px;    /* fixed max width */
+  width: 100%;         /* responsive */
+  border-radius: 8px;
+  box-shadow: 0 0 10px rgba(0,0,0,0.1);
+}
+
+/* Headline */
+.auth-form h2 {
+  text-align: center;
+  color: black;
+}
+
+/* Inputs */
+.auth-form input {
+  display: block;
+  width: 95%;
+  padding: 10px;
+  margin-bottom: 15px;
+  border-radius: 5px;
+  border: 1px solid #ccc;
+}
+
+/* Button */
+.auth-form button {
+  padding: 10px 20px;
+  background: #007BFF;
+  color: white;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+  width: 50%;
+  display: block;
+  margin: 0 auto; /* center button */
+}
+
+/* Message */
+.auth-form .message {
+  margin-top: 15px;
+  color: red;
+  text-align: center;
+}
+
+/* Footer */
+.auth-form p {
+  text-align: center;
+  margin-top: 10px;
+  color: black;
+}
