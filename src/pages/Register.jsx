@@ -15,11 +15,11 @@ export default function Register() {
 
   useEffect(() => {
     if (showSuccess) {
-      // auto-close after 4 seconds (between 3-5s as requested)
+      // auto-close after 2.5 seconds
       timerRef.current = setTimeout(() => {
         setShowSuccess(false);
         navigate('/login');
-      }, 400000);
+      }, 2500);
     }
     return () => {
       if (timerRef.current) {
