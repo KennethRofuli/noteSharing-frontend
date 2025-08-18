@@ -177,7 +177,7 @@ html, body, #root {
 
 .modal-content {
   background: #ffffff;
-  width: min(480px, 92%);
+  width: min(375px, 92%);
   max-width: 100%;
   border-radius: 12px;
   box-shadow: 0 10px 30px rgba(8, 20, 40, 0.18);
