@@ -2,6 +2,7 @@ import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-d
 import Login from './pages/Login';
 import Register from './pages/Register';
 import Dashboard from './pages/Dashboard';
+import Verify from './pages/Verify';
 
 function App() {
   const token = localStorage.getItem('token'); // check if logged in
@@ -12,6 +13,7 @@ function App() {
         {/* Public routes */}
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<Register />} />
+        <Route path="/verify/:token" element={<Verify />} />
 
         {/* Protected route */}
         <Route

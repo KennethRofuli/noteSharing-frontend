@@ -18,25 +18,44 @@ export default function Login() {
       if (!token) throw new Error('No token returned');
 
       localStorage.setItem('token', token);
-      
-      navigate('/dashboard'); // redirect on success
+
+      // Redirect to dashboard on successful login
+      navigate('/dashboard');
     } catch (err) {
-      console.error(err);
-      setMessage(err.response?.data?.message || 'Login failed');
+      console.error('[Login] error', err.response?.data || err.message);
+
+      // Check for unverified email
+      if (err.response?.data?.message === 'Please verify your email first') {
+        setMessage('Please verify your email before logging in.');
+      } else {
+        setMessage(err.response?.data?.message || 'Login failed');
+      }
     }
   };
-
-  
 
   return (
     <div className="auth-container">
       <form onSubmit={handleSubmit} className="auth-form">
         <h2>Login</h2>
-        <input type="email" placeholder="Email" value={email} onChange={e => setEmail(e.target.value)} required />
-        <input type="password" placeholder="Password" value={password} onChange={e => setPassword(e.target.value)} required />
+        <input 
+          type="email" 
+          placeholder="Email" 
+          value={email} 
+          onChange={e => setEmail(e.target.value)} 
+          required 
+        />
+        <input 
+          type="password" 
+          placeholder="Password" 
+          value={password} 
+          onChange={e => setPassword(e.target.value)} 
+          required 
+        />
         <button type="submit">Login</button>
         <div className="message">{message}</div>
-        <p>Don't have an account? <a href="/register">Register</a></p>
+        <p>
+          Don't have an account? <a href="/register">Register</a>
+        </p>
       </form>
     </div>
   );

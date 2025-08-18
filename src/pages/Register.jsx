@@ -1,8 +1,7 @@
-// src/pages/Register.jsx
 import { useState } from 'react';
 import API from '../api/api';
 import { useNavigate } from 'react-router-dom';
-import './styles/Auth.css';   // ✅ reuse the same styles
+import './styles/Auth.css';
 
 export default function Register() {
   const [name, setName] = useState('');
@@ -14,23 +13,26 @@ export default function Register() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     try {
-      // normalize email
-      const payload = { name: name.trim(), email: email.trim().toLowerCase(), password };
-      const res = await API.post('/auth/register', payload);
+      const payload = {
+        name: name.trim(),
+        email: email.trim().toLowerCase(),
+        password
+      };
 
+      const res = await API.post('/auth/register', payload);
       console.log('[Register] response', res.status, res.data);
 
       const token = res.data?.token;
-      if (!token) {
-        // helpful message and do not navigate
-        setMessage(res.data?.message || 'Registration succeeded but no token returned');
+      if (token) {
+        localStorage.setItem('token', token);
+        // navigate and force a reload so Dashboard reads fresh token
+        window.location.href = '/login';
         return;
       }
 
-      // store token and force a full reload so Dashboard reads it reliably
-      localStorage.setItem('token', token);
-      // use full reload to avoid any stale closures in mounted components
-      window.location.href = '/dashboard';
+      // fallback: show server message
+      setMessage(res.data?.message || 'Registration successful. Check your email to verify.');
+      setName(''); setEmail(''); setPassword('');
     } catch (err) {
       console.error('[Register] error', err.response?.data || err.message);
       setMessage(err.response?.data?.message || 'Registration failed');
@@ -41,7 +43,6 @@ export default function Register() {
     <div className="auth-container">
       <form onSubmit={handleSubmit} className="auth-form">
         <h2>Register</h2>
-
         <input
           type="text"
           placeholder="Full Name"
@@ -49,7 +50,6 @@ export default function Register() {
           onChange={(e) => setName(e.target.value)}
           required
         />
-
         <input
           type="email"
           placeholder="Email"
@@ -57,7 +57,6 @@ export default function Register() {
           onChange={(e) => setEmail(e.target.value)}
           required
         />
-
         <input
           type="password"
           placeholder="Password"
@@ -65,7 +64,6 @@ export default function Register() {
           onChange={(e) => setPassword(e.target.value)}
           required
         />
-
         <button type="submit">Register</button>
 
         <div className="message">{message}</div>
