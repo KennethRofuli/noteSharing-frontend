@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import Login from './pages/Login';
 import Register from './pages/Register';
@@ -5,24 +6,23 @@ import Dashboard from './pages/Dashboard';
 import Verify from './pages/Verify';
 
 function App() {
-  const token = localStorage.getItem('token'); // check if logged in
+  const [token, setToken] = useState(localStorage.getItem('token'));
+
+  // Optional: sync with localStorage changes from other tabs
+  useEffect(() => {
+    const handleStorage = () => setToken(localStorage.getItem('token'));
+    window.addEventListener('storage', handleStorage);
+    return () => window.removeEventListener('storage', handleStorage);
+  }, []);
 
   return (
     <Router>
       <Routes>
-        {/* Public routes */}
-        <Route path="/login" element={<Login />} />
+        <Route path="/login" element={<Login onLogin={(t) => setToken(t)} />} />
         <Route path="/register" element={<Register />} />
         <Route path="/verify/:token" element={<Verify />} />
-
-        {/* Protected route */}
-        <Route
-          path="/dashboard"
-          element={token ? <Dashboard /> : <Navigate to="/login" />}
-        />
-
-        {/* Default redirect */}
-        <Route path="*" element={<Navigate to="/login" />} />
+        <Route path="/dashboard" element={token ? <Dashboard /> : <Navigate to="/login" />} />
+        <Route path="*" element={<Navigate to={token ? "/dashboard" : "/login"} />} />
       </Routes>
     </Router>
   );

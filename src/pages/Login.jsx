@@ -3,7 +3,7 @@ import API from '../api/api';
 import { useNavigate } from 'react-router-dom';
 import './styles/Auth.css';
 
-export default function Login() {
+export default function Login({ onLogin }) { // <-- accept onLogin prop
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [message, setMessage] = useState('');
@@ -17,19 +17,19 @@ export default function Login() {
 
       if (!token) throw new Error('No token returned');
 
+      // Store token and notify App
       localStorage.setItem('token', token);
+      if (onLogin) onLogin(token); // update App state
 
-      // Redirect to dashboard on successful login
+      // Navigate to dashboard
       navigate('/dashboard');
     } catch (err) {
       console.error('[Login] error', err.response?.data || err.message);
-
-      // Check for unverified email
-      if (err.response?.data?.message === 'Please verify your email first') {
-        setMessage('Please verify your email before logging in.');
-      } else {
-        setMessage(err.response?.data?.message || 'Login failed');
-      }
+      setMessage(
+        err.response?.data?.message === 'Please verify your email first'
+          ? 'Please verify your email before logging in.'
+          : err.response?.data?.message || 'Login failed'
+      );
     }
   };
 
