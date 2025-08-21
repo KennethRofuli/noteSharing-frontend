@@ -30,6 +30,7 @@ export default function Dashboard() {
   const [searchTerm, setSearchTerm] = useState('');
   const [searchResults, setSearchResults] = useState([]);
   const [selectedUser, setSelectedUser] = useState(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState(null);
 
   const getToken = () => localStorage.getItem('token');
   const [currentUserId, setCurrentUserId] = useState(null);
@@ -155,19 +156,26 @@ export default function Dashboard() {
     navigate('/login');
   };
 
-  const handleDelete = async (noteId) => {
-    if (!window.confirm('Are you sure you want to delete this note?')) return;
+  const handleDelete = (noteId) => {
+    // open modal instead of window.confirm
+    setConfirmDeleteId(noteId);
+  };
+
+  const handleDeleteConfirmed = async () => {
+    const noteId = confirmDeleteId;
+    setConfirmDeleteId(null);
     try {
-      await API.delete(`/notes/delete/${noteId}`, {
-        headers: { Authorization: `Bearer ${getToken()}` }
-      });
+      await API.delete(`/notes/delete/${noteId}`, { headers: { Authorization: `Bearer ${getToken()}` } });
       setNotes(prev => prev.filter(n => n._id !== noteId));
       setFilteredNotes(prev => prev.filter(n => n._id !== noteId));
+      toast.success('Note deleted');
     } catch (err) {
       console.error(err);
-      alert('Failed to delete note.');
+      toast.error(err.response?.data?.message || 'Failed to delete note.');
     }
   };
+
+  const handleCancelDelete = () => setConfirmDeleteId(null);
 
   // NEW: download protected file via API (includes JWT)
   const handleDownload = async (note) => {
@@ -190,7 +198,7 @@ export default function Dashboard() {
       window.URL.revokeObjectURL(url);
     } catch (err) {
       console.error(err);
-      alert(err.response?.data?.message || 'Download failed');
+      toast.error(err.response?.data?.message || 'Download failed');
     }
   };
 
@@ -223,14 +231,14 @@ export default function Dashboard() {
         { userEmail: selectedUser.email },
         { headers: { Authorization: `Bearer ${getToken()}` } }
       );
-      alert(`Note shared with ${selectedUser.email}`);
+      toast.success(`Note shared with ${selectedUser.email}`);
       setShareNoteId(null);
       setSearchTerm('');
       setSearchResults([]);
       setSelectedUser(null);
     } catch (err) {
       console.error(err);
-      alert('Failed to share note.');
+      toast.error('Failed to share note.');
     }
   };
 
@@ -442,7 +450,32 @@ export default function Dashboard() {
                 </ul>
               )}
               <button onClick={handleShare} disabled={!selectedUser}>Share</button>
-              <button onClick={() => setShareNoteId(null)}>Cancel</button>
+              <button
+                onClick={() => {
+                  setShareNoteId(null);
+                  setSearchTerm('');
+                  setSearchResults([]);
+                  setSelectedUser(null);
+                }}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* confirmation modal (simple) */}
+        {confirmDeleteId && (
+          <div className="confirm-modal" style={{
+            position: 'fixed', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
+            background: 'rgba(0,0,0,0.4)', zIndex: 2000
+          }}>
+            <div style={{ background: '#fff', padding: 20, borderRadius: 6, minWidth: 300 }}>
+              <p>Are you sure you want to delete this note?</p>
+              <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                <button onClick={handleCancelDelete}>Cancel</button>
+                <button onClick={handleDeleteConfirmed} style={{ background: '#d9534f', color: '#fff' }}>Delete</button>
+              </div>
             </div>
           </div>
         )}
