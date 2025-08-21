@@ -2,6 +2,8 @@ import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import API from '../api/api';
 import './styles/Dashboard.css';
+import { ToastContainer, toast } from 'react-toastify';
+import 'react-toastify/dist/ReactToastify.css';
 
 export default function Dashboard() {
   const navigate = useNavigate();
@@ -14,6 +16,13 @@ export default function Dashboard() {
   const [courseCode, setCourseCode] = useState('');
   const [instructor, setInstructor] = useState('');
   const [file, setFile] = useState(null);
+  const [fileError, setFileError] = useState('');
+  // keep in sync with backend allowed list
+  const allowedExtensions = [
+    ".pdf", ".doc", ".docx", ".ppt", ".pptx", ".xls", ".xlsx", ".zip"
+  ];
+  // client-side max file size (must match backend): 20 MB
+  const MAX_FILE_BYTES = 20 * 1024 * 1024;
   const [message, setMessage] = useState('');
 
   // Sharing states
@@ -85,6 +94,11 @@ export default function Dashboard() {
 
   const handleUpload = async (e) => {
     e.preventDefault();
+    // client-side guard: block submit if file is invalid
+    if (fileError) {
+      setMessage(`invalid file allowed files are ${allowedExtensions.map(x => `"${x}"`).join(', ')}`);
+      return;
+    }
     try {
       const formData = new FormData();
       formData.append('title', title);
@@ -113,10 +127,26 @@ export default function Dashboard() {
       setFile(null);
       if (fileInputRef.current) fileInputRef.current.value = '';
 
+      // success toast
+      toast.success('Upload successful');
       setMessage('Upload successful');
     } catch (err) {
       console.error(err);
-      setMessage(err.response?.data?.message || 'Upload failed');
+      const serverMsg = err.response?.data?.message || err.message || 'Upload failed';
+      // if backend reports disallowed type, mirror to fileError as well
+      if (serverMsg.toLowerCase().includes('file type not allowed') || serverMsg.toLowerCase().includes('allowed extension')) {
+        setFileError(serverMsg);
+      }
+      // show toast for file-too-large or other server messages
+      if (serverMsg.toLowerCase().includes('file too large') || serverMsg.toLowerCase().includes('max size')) {
+        toast.error(serverMsg);
+        setFile(null);
+        if (fileInputRef.current) fileInputRef.current.value = '';
+        setFileError(serverMsg);
+      } else {
+        toast.error(serverMsg);
+      }
+      setMessage(serverMsg);
     }
   };
 
@@ -267,122 +297,156 @@ export default function Dashboard() {
   const sharedNotes = visibleNotes.filter(n => !isOwned(n) && isSharedWithMe(n));
 
   return (
-    <div className="dashboard-container">
-      <div className="sidebar">
-        <h3>Courses</h3>
-        <ul>
-          <li
-            className={!selectedCourse || selectedCourse === 'all' ? 'active' : ''}
-            onClick={() => handleCourseClick('all')}
-          >
-            All Courses ({notes.length})
-          </li>
-          {Object.entries(courseCounts).map(([course, count]) => (
+    <>
+     {/* toast container (does not affect layout) */}
+     <ToastContainer position="top-center" autoClose={2250} hideProgressBar={false} newestOnTop closeOnClick pauseOnHover draggable />
+      <div className="dashboard-container">
+        <div className="sidebar">
+          <h3>Courses</h3>
+          <ul>
             <li
-              key={course}
-              className={selectedCourse === course ? 'active' : ''}
-              onClick={() => handleCourseClick(course)}
+              className={!selectedCourse || selectedCourse === 'all' ? 'active' : ''}
+              onClick={() => handleCourseClick('all')}
             >
-              {course} ({count})
+              All Courses ({notes.length})
             </li>
-          ))}
-        </ul>
-      </div>
-
-      <div className="content">
-        <div className="dashboard-header">
-          <h2>{currentUserName && <div className="user-greeting">Hello, {currentUserName}</div>}</h2>          
-          <button className="logout-btn" onClick={handleLogout}>Logout</button>
+            {Object.entries(courseCounts).map(([course, count]) => (
+              <li
+                key={course}
+                className={selectedCourse === course ? 'active' : ''}
+                onClick={() => handleCourseClick(course)}
+              >
+                {course} ({count})
+              </li>
+            ))}
+          </ul>
         </div>
 
-        <form onSubmit={handleUpload} className="upload-form">
-          <input value={title} onChange={e => setTitle(e.target.value)} placeholder="Title" required />
-          <input value={description} onChange={e => setDescription(e.target.value)} placeholder="Description" required />
-          <input value={courseCode} onChange={e => setCourseCode(e.target.value)} placeholder="Course Code" required />
-          <input value={instructor} onChange={e => setInstructor(e.target.value)} placeholder="Instructor" required />
-          <input type="file" onChange={e => setFile(e.target.files[0])} ref={fileInputRef} required />
-          <button type="submit">Upload Note</button>
-        </form>
-        <div>{message}</div>
-
-        <div className="notes-columns">
-          <div className="notes-column">
-            <h3>My Notes ({myNotes.length})</h3>
-            <div className="notes-grid-column">
-              {myNotes.map(note => (
-                <div className="note-card" key={note._id}>
-                  <p className="course-code">{note.courseCode}</p>
-                  <h4>{note.title}</h4>
-                  <p>{note.description}</p>
-                  <p><strong>Prof:</strong> {note.instructor}</p>
-                  <div className="card-actions">
-                    <button className="btn" onClick={() => setShareNoteId(note._id)}>Share</button>
-                    <button className="btn" onClick={() => handleDownload(note)}>Download</button>
-                    <button className="btn delete-btn" onClick={() => handleDelete(note._id)}>Delete</button>
-                  </div>
-                </div>
-              ))}
-            </div>
+        <div className="content">
+          <div className="dashboard-header">
+            <h2>{currentUserName && <div className="user-greeting">Hello, {currentUserName}</div>}</h2>          
+            <button className="logout-btn" onClick={handleLogout}>Logout</button>
           </div>
 
-          <div className="notes-column">
-            <h3>Shared With Me ({sharedNotes.length})</h3>
-            <div className="notes-grid-column">
-              {sharedNotes.map(note => {
-                const sharer = getSharerName(note);
-                return (
+          <form onSubmit={handleUpload} className="upload-form">
+            <input value={title} onChange={e => setTitle(e.target.value)} placeholder="Title" required />
+            <input value={description} onChange={e => setDescription(e.target.value)} placeholder="Description" required />
+            <input value={courseCode} onChange={e => setCourseCode(e.target.value)} placeholder="Course Code" required />
+            <input value={instructor} onChange={e => setInstructor(e.target.value)} placeholder="Instructor" required />
+            <input
+              type="file"
+              onChange={(e) => {
+                const f = e.target.files[0];
+                if (!f) {
+                  setFile(null);
+                  setFileError('');
+                  return;
+                }
+                const ext = '.' + f.name.split('.').pop().toLowerCase();
+                if (!allowedExtensions.includes(ext)) {
+                  // toast non-blocking notification (no layout shift)
+                  toast.error(`Invalid file. Allowed files are: ${allowedExtensions.join(', ')}`);
+                  setFile(null);
+                  if (fileInputRef.current) fileInputRef.current.value = '';
+                  return;
+                }
+                // client-side size check (20 MB)
+                if (f.size > MAX_FILE_BYTES) {
+                  toast.error(`File too large. Max size is ${Math.round(MAX_FILE_BYTES / 1024 / 1024)} MB`);
+                  setFile(null);
+                  setFileError(`File too large. Max size is ${Math.round(MAX_FILE_BYTES / 1024 / 1024)} MB`);
+                  if (fileInputRef.current) fileInputRef.current.value = '';
+                  return;
+                }
+                setFile(f);
+                setFileError('');
+              }}
+              ref={fileInputRef}
+              required
+            />
+            <button type="submit" disabled={!file || !!fileError}>Upload Note</button>
+          </form>
+          <div>{message}</div>
+
+          <div className="notes-columns">
+            <div className="notes-column">
+              <h3>My Notes ({myNotes.length})</h3>
+              <div className="notes-grid-column">
+                {myNotes.map(note => (
                   <div className="note-card" key={note._id}>
-                    {sharer && <p><strong>Shared by:</strong> {sharer}</p>}
                     <p className="course-code">{note.courseCode}</p>
                     <h4>{note.title}</h4>
-                    <p>{note.description}</p>                    
+                    <p>{note.description}</p>
                     <p><strong>Prof:</strong> {note.instructor}</p>
                     <div className="card-actions">
+                      <button className="btn" onClick={() => setShareNoteId(note._id)}>Share</button>
                       <button className="btn" onClick={() => handleDownload(note)}>Download</button>
+                      <button className="btn delete-btn" onClick={() => handleDelete(note._id)}>Delete</button>
                     </div>
                   </div>
-                );
-              })}
+                ))}
+              </div>
+            </div>
+
+            <div className="notes-column">
+              <h3>Shared With Me ({sharedNotes.length})</h3>
+              <div className="notes-grid-column">
+                {sharedNotes.map(note => {
+                  const sharer = getSharerName(note);
+                  return (
+                    <div className="note-card" key={note._id}>
+                      {sharer && <p><strong>Shared by:</strong> {sharer}</p>}
+                      <p className="course-code">{note.courseCode}</p>
+                      <h4>{note.title}</h4>
+                      <p>{note.description}</p>                    
+                      <p><strong>Prof:</strong> {note.instructor}</p>
+                      <div className="card-actions">
+                        <button className="btn" onClick={() => handleDownload(note)}>Download</button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           </div>
         </div>
-      </div>
 
-      {/* SHARE MODAL */}
-      {shareNoteId && (
-        <div className="modal">
-          <div className="modal-content">
-            <h3>Share Note</h3>
-            <input
-              type="text"
-              placeholder="Search user by email..."
-              value={searchTerm}
-              onChange={(e) => {
-                setSearchTerm(e.target.value);
-                setSelectedUser(null);
-              }}
-            />
-            {searchResults.length > 0 && (
-              <ul className="search-results">
-                {searchResults.map(user => (
-                  <li
-                    key={user._id}
-                    onClick={() => {
-                      setSelectedUser(user);
-                      setSearchTerm(user.email);
-                      setSearchResults([]);
-                    }}
-                  >
-                    {user.email}
-                  </li>
-                ))}
-              </ul>
-            )}
-            <button onClick={handleShare} disabled={!selectedUser}>Share</button>
-            <button onClick={() => setShareNoteId(null)}>Cancel</button>
+        {/* SHARE MODAL */}
+        {shareNoteId && (
+          <div className="modal">
+            <div className="modal-content">
+              <h3>Share Note</h3>
+              <input
+                type="text"
+                placeholder="Search user by email..."
+                value={searchTerm}
+                onChange={(e) => {
+                  setSearchTerm(e.target.value);
+                  setSelectedUser(null);
+                }}
+              />
+              {searchResults.length > 0 && (
+                <ul className="search-results">
+                  {searchResults.map(user => (
+                    <li
+                      key={user._id}
+                      onClick={() => {
+                        setSelectedUser(user);
+                        setSearchTerm(user.email);
+                        setSearchResults([]);
+                      }}
+                    >
+                      {user.email}
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <button onClick={handleShare} disabled={!selectedUser}>Share</button>
+              <button onClick={() => setShareNoteId(null)}>Cancel</button>
+            </div>
           </div>
-        </div>
-      )}
-    </div>
+        )}
+      </div>
+    </>
   );
 }

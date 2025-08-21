@@ -145,8 +145,11 @@ export default function Register() {
         <div className="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="reg-success-title">
           <div className="modal">
             <div className="modal-content">
-              <h3 id="reg-success-title">Registration successful</h3>              
+              <h3 id="reg-success-title">Registration successful</h3>
               <p>Please check your email for a verification link. You will be redirected to login shortly.</p>
+              <p style={{ fontSize: '0.9em', color: '#888' }}>
+                Note: Accounts that are not verified within 24 hours will be automatically deleted.
+              </p>
             </div>
           </div>
         </div>
