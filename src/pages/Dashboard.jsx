@@ -1,9 +1,13 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import API from '../api/api';
 import './styles/Dashboard.css';
 import { ToastContainer, toast } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
+import { io } from 'socket.io-client';
+import messageIcon from '../assets/envelope.jpg';
+
+const socket = io('http://localhost:3000'); // adjust port if needed
 
 export default function Dashboard() {
   const navigate = useNavigate();
@@ -130,7 +134,6 @@ export default function Dashboard() {
 
       // success toast
       toast.success('Upload successful');
-      setMessage('Upload successful');
     } catch (err) {
       console.error(err);
       const serverMsg = err.response?.data?.message || err.message || 'Upload failed';
@@ -168,7 +171,7 @@ export default function Dashboard() {
       await API.delete(`/notes/delete/${noteId}`, { headers: { Authorization: `Bearer ${getToken()}` } });
       setNotes(prev => prev.filter(n => n._id !== noteId));
       setFilteredNotes(prev => prev.filter(n => n._id !== noteId));
-      toast.success('Note deleted');
+      toast.error('Note deleted');
     } catch (err) {
       console.error(err);
       toast.error(err.response?.data?.message || 'Failed to delete note.');
@@ -242,6 +245,99 @@ export default function Dashboard() {
     }
   };
 
+  useEffect(() => {
+    if (currentUserId) {
+      socket.emit('register', currentUserId);
+    }
+  }, [currentUserId]);
+
+  // Listen for note-shared event
+  useEffect(() => {
+    socket.on('note-shared', (data) => {
+      fetchNotes();
+      toast.info('A note was shared with you!');
+    });
+
+    // Listen for note-deleted event
+    socket.on('note-deleted', (data) => {
+      fetchNotes();
+      toast.error('A note shared with you was deleted.');
+    });
+
+    return () => {
+      socket.off('note-shared');
+      socket.off('note-deleted');
+    };
+  }, []);
+
+  // --- Chat states ---
+  const [chatOpen, setChatOpen] = useState(false);
+  const [chatInput, setChatInput] = useState('');
+  const [chatMessages, setChatMessages] = useState([]);
+  const [chatSearch, setChatSearch] = useState('');
+  const [chatUsers, setChatUsers] = useState([]);
+  const [chatRecipient, setChatRecipient] = useState(null);
+
+  // Fetch verified users for chat (debounced search)
+  useEffect(() => {
+    if (!chatOpen) return;
+    const fetchUsers = async () => {
+      try {
+        const q = chatSearch.trim();
+        const url = q.length > 0
+          ? `/users/search?q=${encodeURIComponent(q)}`
+          : '/users/verified';
+        const res = await API.get(url, {
+          headers: { Authorization: `Bearer ${getToken()}` }
+        });
+        setChatUsers(res.data);
+      } catch (err) {
+        setChatUsers([]);
+      }
+    };
+    const delay = setTimeout(fetchUsers, 300);
+    return () => clearTimeout(delay);
+  }, [chatSearch, chatOpen]);
+
+  // Listen for incoming chat messages
+  useEffect(() => {
+    socket.on('chat-message', (msg) => {
+      console.log('[SOCKET][CHAT][FRONTEND] Received:', msg);
+      setChatMessages(prev => [...prev, msg]);
+    });
+    return () => socket.off('chat-message');
+  }, []);
+
+  // Send chat message
+  const sendChat = useCallback(() => {
+    if (!chatInput.trim() || !chatRecipient) return;
+    const msg = {
+      to: chatRecipient._id,
+      text: chatInput,
+      from: currentUserId,
+      timestamp: new Date().toISOString()
+    };
+    socket.emit('chat-message', msg);
+    setChatMessages(prev => [...prev, { ...msg, self: true }]);
+    setChatInput('');
+  }, [chatInput, chatRecipient, currentUserId]);
+
+  // Fetch chat history when recipient changes
+  useEffect(() => {
+    if (!chatRecipient) return;
+    const fetchHistory = async () => {
+      try {
+        const res = await API.get(`/chat/history/${chatRecipient._id}`, {
+          headers: { Authorization: `Bearer ${getToken()}` }
+        });
+        setChatMessages(res.data);
+      } catch (err) {
+        setChatMessages([]);
+      }
+    };
+    fetchHistory();
+  }, [chatRecipient]);
+
   const courseCounts = notes.reduce((acc, note) => {
     acc[note.courseCode] = (acc[note.courseCode] || 0) + 1;
     return acc;
@@ -263,6 +359,11 @@ export default function Dashboard() {
   const isSharedWithMe = (note) => {
     if (!note || !note.sharedWith || !currentUserId) return false;
     return note.sharedWith.some(sw => {
+      // Check for subdoc with recipient field
+      if (sw && sw.recipient) {
+        return sw.recipient.toString() === currentUserId.toString();
+      }
+      // Fallback for legacy: direct ObjectId
       const sid = sw?._id ? sw._id.toString() : (sw?.toString ? sw.toString() : '');
       return sid === currentUserId.toString();
     });
@@ -479,6 +580,94 @@ export default function Dashboard() {
             </div>
           </div>
         )}
+
+        {/* Chat Widget */}
+        <div
+          className={`chat-widget${chatOpen ? ' open' : ' closed'}`}
+        >
+          {!chatOpen ? (
+            <button
+              className="chat-fab"
+              onClick={() => setChatOpen(true)}
+              aria-label="New message"
+              title="New message"
+            >
+              <img src={messageIcon} alt="New message" />
+            </button>
+          ) : (
+            <div className="chat-window">
+              <div className="chat-header">
+                <span>Chat</span>
+                <button
+                  className="chat-close-btn"
+                  onClick={() => setChatOpen(false)}
+                >×</button>
+              </div>
+              <div className="chat-search-container">
+                <input
+                  className="chat-search-input"
+                  placeholder="Search user by email..."
+                  value={chatSearch}
+                  onChange={e => {
+                    setChatSearch(e.target.value);
+                    setChatRecipient(null);
+                  }}
+                />
+                <ul className="chat-user-list">
+                  {chatUsers.length > 0 ? (
+                    chatUsers.map(u => (
+                      <li
+                        key={u._id}
+                        className={chatRecipient && chatRecipient._id === u._id ? 'selected' : ''}
+                        onClick={() => {
+                          setChatRecipient(u);
+                          setChatSearch(u.email);
+                          setChatUsers([]);
+                        }}
+                      >
+                        {u.name ? `${u.name} (${u.email})` : u.email}
+                      </li>
+                    ))
+                  ) : null}
+                </ul>
+              </div>
+              <div className="chat-messages">
+                {chatRecipient ? (
+                  chatMessages
+                    .filter(m =>
+                      (m.from === currentUserId && m.to === chatRecipient._id) ||
+                      (m.from === chatRecipient._id && m.to === currentUserId)
+                    )
+                    .map((m, i) => (
+                      <div
+                        key={i}
+                        className={`chat-message-row${m.from === currentUserId ? ' self' : ''}`}
+                      >
+                        <span className="chat-message-bubble">{m.text}</span>
+                      </div>
+                    ))
+                ) : (
+                  <div style={{ color: '#888', fontSize: 14 }}>Select a user to chat</div>
+                )}
+              </div>
+              <div className="chat-input-row">
+                <input
+                  className="chat-input"
+                  placeholder="Type a message..."
+                  value={chatInput}
+                  onChange={e => setChatInput(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') sendChat(); }}
+                  disabled={!chatRecipient}
+                />
+                <button
+                  className="chat-send-btn"
+                  onClick={sendChat}
+                  disabled={!chatInput.trim() || !chatRecipient}
+                >Send</button>
+              </div>
+            </div>
+          )}
+        </div>
       </div>
     </>
   );
