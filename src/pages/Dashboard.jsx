@@ -246,9 +246,21 @@ export default function Dashboard() {
   };
 
   useEffect(() => {
-    if (currentUserId) {
-      socket.emit('register', currentUserId);
-    }
+    if (!currentUserId) return;
+    const register = () => {
+      if (socket && socket.connected) {
+        socket.emit('register', String(currentUserId));
+        console.log('[SOCKET][CLIENT] register', currentUserId);
+      }
+    };
+    // initial register and re-register after reconnects
+    register();
+    socket.on('connect', register);
+    socket.on('reconnect', register);
+    return () => {
+      socket.off('connect', register);
+      socket.off('reconnect', register);
+    };
   }, [currentUserId]);
 
   // Listen for note-shared event
@@ -273,10 +285,27 @@ export default function Dashboard() {
   // --- Chat states ---
   const [chatOpen, setChatOpen] = useState(false);
   const [chatInput, setChatInput] = useState('');
-  const [chatMessages, setChatMessages] = useState([]);
+  const [chatMessages, setChatMessages] = useState([]); // chronological: oldest -> newest
   const [chatSearch, setChatSearch] = useState('');
   const [chatUsers, setChatUsers] = useState([]);
   const [chatRecipient, setChatRecipient] = useState(null);
+
+  // pagination state for chat history
+  const PAGE_SIZE = 20;
+  const [chatPage, setChatPage] = useState(0); // 0 = latest page
+  const [chatHasMore, setChatHasMore] = useState(true);
+  const [loadingOlder, setLoadingOlder] = useState(false);
+
+  // ref for the scrollable chat messages container
+  const chatScrollRef = useRef(null);
+
+  // helper to scroll chat to bottom
+  const scrollChatToBottom = (behavior = 'auto') => {
+    const el = chatScrollRef.current;
+    if (el) {
+      el.scrollTo({ top: el.scrollHeight, behavior });
+    }
+  };
 
   // Fetch verified users for chat (debounced search)
   useEffect(() => {
@@ -302,11 +331,120 @@ export default function Dashboard() {
   // Listen for incoming chat messages
   useEffect(() => {
     socket.on('chat-message', (msg) => {
-      console.log('[SOCKET][CHAT][FRONTEND] Received:', msg);
-      setChatMessages(prev => [...prev, msg]);
+      // append newest message at the end (chronological order)
+      setChatMessages(prev => {
+        // if message belongs to current open conversation, append
+        if (!chatRecipient) return prev;
+        const belongs = (msg.from === currentUserId && msg.to === chatRecipient._id) ||
+                        (msg.from === chatRecipient._id && msg.to === currentUserId);
+        if (!belongs) return prev;
+        return [...prev, msg];
+      });
     });
     return () => socket.off('chat-message');
-  }, []);
+  }, [chatRecipient, currentUserId]);
+
+  // auto-scroll to bottom when new messages arrive at end
+  useEffect(() => {
+    // if user is currently at bottom or chat was just opened, keep pinned to bottom
+    const el = chatScrollRef.current;
+    if (!el) return;
+    const nearBottom = (el.scrollHeight - el.scrollTop - el.clientHeight) < 100;
+    if (nearBottom) scrollChatToBottom('smooth');
+  }, [chatMessages]);
+
+  // also keep view pinned to bottom while typing
+  useEffect(() => {
+    if (!chatOpen || !chatRecipient) return;
+    const el = chatScrollRef.current;
+    if (!el) return;
+    // keep pinned only if near bottom
+    const nearBottom = (el.scrollHeight - el.scrollTop - el.clientHeight) < 100;
+    if (nearBottom) scrollChatToBottom('auto');
+  }, [chatInput, chatOpen, chatRecipient]);
+
+  // Fetch chat history paginated: newest PAGE_SIZE first (page=0)
+  const fetchHistoryPage = async (recipientId, page = 0) => {
+    if (!recipientId) return;
+    // if loading older page already, skip
+    if (loadingOlder) return;
+    setLoadingOlder(true);
+    try {
+      const skip = page * PAGE_SIZE;
+      // request with query params; backend may ignore but many libs support limit/skip
+      const res = await API.get(`/chat/history/${recipientId}?limit=${PAGE_SIZE}&skip=${skip}`, {
+        headers: { Authorization: `Bearer ${getToken()}` }
+      });
+      let msgs = Array.isArray(res.data) ? res.data : [];
+      // We expect backend returns newest-first when using skip/limit from latest.
+      // Normalize to chronological (oldest -> newest) for UI.
+      // If backend returns oldest-first already, reversing will be incorrect — but most APIs return newest-first for this pattern.
+      // Guard: if the last item has timestamp smaller than first, assume newest-first and reverse.
+      if (msgs.length > 1) {
+        const firstTs = new Date(msgs[0].timestamp || msgs[0].createdAt || msgs[0].time || 0).getTime();
+        const lastTs = new Date(msgs[msgs.length - 1].timestamp || msgs[msgs.length - 1].createdAt || msgs[msgs.length - 1].time || 0).getTime();
+        if (firstTs > lastTs) {
+          msgs = msgs.reverse();
+        }
+        // if firstTs <= lastTs already chronological, keep as-is
+      }
+
+      if (page === 0) {
+        // initial load: replace and scroll to bottom after render
+        setChatMessages(msgs);
+        setChatPage(0);
+        setChatHasMore(msgs.length === PAGE_SIZE);
+        // allow DOM to paint then scroll
+        setTimeout(() => scrollChatToBottom('auto'), 50);
+      } else {
+        // older pages: prepend items and keep scroll position stable
+        const el = chatScrollRef.current;
+        const prevScrollHeight = el ? el.scrollHeight : 0;
+        setChatMessages(prev => {
+          // avoid duplicates by filtering existing ids
+          const existingIds = new Set(prev.map(m => m._id || `${m.from}_${m.to}_${m.timestamp}`));
+          const uniqueOlder = msgs.filter(m => !existingIds.has(m._id || `${m.from}_${m.to}_${m.timestamp}`));
+          return [...uniqueOlder, ...prev];
+        });
+        setChatPage(page);
+        setChatHasMore(msgs.length === PAGE_SIZE);
+        // restore scroll position after DOM update
+        setTimeout(() => {
+          if (!el) return;
+          const newScrollHeight = el.scrollHeight;
+          // keep the viewport showing same content: shift scrollTop by difference
+          el.scrollTop = newScrollHeight - prevScrollHeight + (el.scrollTop || 0);
+        }, 50);
+      }
+    } catch (err) {
+      console.error('fetchHistoryPage', err);
+    } finally {
+      setLoadingOlder(false);
+    }
+  };
+
+  // When recipient changes, reset pagination and load latest page
+  useEffect(() => {
+    setChatMessages([]);
+    setChatPage(0);
+    setChatHasMore(true);
+    setLoadingOlder(false);
+    if (chatRecipient) {
+      fetchHistoryPage(chatRecipient._id, 0);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chatRecipient]);
+
+  // scroll handler to detect when user reached top to load older messages
+  const handleChatScroll = () => {
+    const el = chatScrollRef.current;
+    if (!el || !chatRecipient || loadingOlder || !chatHasMore) return;
+    // if scrolled near top
+    if (el.scrollTop <= 60) {
+      // load next older page (page + 1)
+      fetchHistoryPage(chatRecipient._id, chatPage + 1);
+    }
+  };
 
   // Send chat message
   const sendChat = useCallback(() => {
@@ -321,22 +459,6 @@ export default function Dashboard() {
     setChatMessages(prev => [...prev, { ...msg, self: true }]);
     setChatInput('');
   }, [chatInput, chatRecipient, currentUserId]);
-
-  // Fetch chat history when recipient changes
-  useEffect(() => {
-    if (!chatRecipient) return;
-    const fetchHistory = async () => {
-      try {
-        const res = await API.get(`/chat/history/${chatRecipient._id}`, {
-          headers: { Authorization: `Bearer ${getToken()}` }
-        });
-        setChatMessages(res.data);
-      } catch (err) {
-        setChatMessages([]);
-      }
-    };
-    fetchHistory();
-  }, [chatRecipient]);
 
   const courseCounts = notes.reduce((acc, note) => {
     acc[note.courseCode] = (acc[note.courseCode] || 0) + 1;
@@ -582,27 +704,32 @@ export default function Dashboard() {
         )}
 
         {/* Chat Widget */}
-        <div
-          className={`chat-widget${chatOpen ? ' open' : ' closed'}`}
-        >
-          {!chatOpen ? (
-            <button
-              className="chat-fab"
-              onClick={() => setChatOpen(true)}
-              aria-label="New message"
-              title="New message"
-            >
-              <img src={messageIcon} alt="New message" />
-            </button>
-          ) : (
-            <div className="chat-window">
-              <div className="chat-header">
-                <span>Chat</span>
-                <button
-                  className="chat-close-btn"
-                  onClick={() => setChatOpen(false)}
-                >×</button>
-              </div>
+        <div className={`chat-widget${chatOpen ? ' open' : ' closed'}`}>
+        {!chatOpen ? (
+          <button
+          className="chat-fab"
+          onClick={() => setChatOpen(true)}
+          aria-label="New message"
+          title="New message"
+          >
+          <img src={messageIcon} alt="New message" />
+        </button>
+    ) : (
+    <div className="chat-window">
+      <div className="chat-header">
+        <span>Chat</span>
+        <button
+          className="chat-close-btn"
+          onClick={() => {
+            setChatOpen(false);
+            setChatRecipient(null);   // 🔹 reset recipient
+            setChatMessages([]);      // 🔹 clear chat
+            setChatSearch('');        // 🔹 clear search field
+            setChatUsers([]);         // 🔹 clear user list
+          }}
+        >×</button>
+      </div>
+
               <div className="chat-search-container">
                 <input
                   className="chat-search-input"
@@ -631,24 +758,37 @@ export default function Dashboard() {
                   ) : null}
                 </ul>
               </div>
-              <div className="chat-messages">
+              <div
+                className="chat-messages"
+                ref={chatScrollRef}
+                onScroll={handleChatScroll}
+                style={{ overflowY: 'auto' }}
+              >
                 {chatRecipient ? (
-                  chatMessages
-                    .filter(m =>
-                      (m.from === currentUserId && m.to === chatRecipient._id) ||
-                      (m.from === chatRecipient._id && m.to === currentUserId)
-                    )
-                    .map((m, i) => (
-                      <div
-                        key={i}
-                        className={`chat-message-row${m.from === currentUserId ? ' self' : ''}`}
-                      >
-                        <span className="chat-message-bubble">{m.text}</span>
-                      </div>
-                    ))
+                  chatMessages.length > 0 ? (
+                    chatMessages
+                      .filter(m =>
+                        (m.from === currentUserId && m.to === chatRecipient._id) ||
+                        (m.from === chatRecipient._id && m.to === currentUserId) ||
+                        // support some shapes where 'to' or 'from' may be ids/strings
+                        (m.to === currentUserId && m.from === chatRecipient._id) ||
+                        (m.to === chatRecipient._id && m.from === currentUserId)
+                      )
+                      .map((m, i) => (
+                        <div
+                          key={m._id || `${i}-${m.timestamp}`}
+                          className={`chat-message-row${(m.from === currentUserId || m.self) ? ' self' : ''}`}
+                        >
+                          <span className="chat-message-bubble">{m.text}</span>
+                        </div>
+                      ))
+                  ) : (
+                    <div style={{ color: '#888', fontSize: 14, padding: 12 }}>No messages yet — say hello</div>
+                  )
                 ) : (
                   <div style={{ color: '#888', fontSize: 14 }}>Select a user to chat</div>
                 )}
+                {loadingOlder && <div style={{ textAlign: 'center', padding: 8, color: '#666' }}>Loading...</div>}
               </div>
               <div className="chat-input-row">
                 <input
