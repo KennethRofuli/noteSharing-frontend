@@ -27,7 +27,8 @@ export default function UploadForm({ onUploaded }) {
       if (file) formData.append('file', file);
 
       const res = await API.post('/notes/upload', formData, {
-        headers: { Authorization: `Bearer ${getToken()}` } // remove explicit multipart Content-Type
+        headers: { Authorization: `Bearer ${getToken()}`, 'Content-Type': 'multipart/form-data' }
+        //headers: { Authorization: `Bearer ${getToken()}` } // remove explicit multipart Content-Type
       });
       const newNote = res.data;
       onUploaded && onUploaded(newNote);
