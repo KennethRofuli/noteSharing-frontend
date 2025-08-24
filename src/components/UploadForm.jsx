@@ -27,7 +27,7 @@ export default function UploadForm({ onUploaded }) {
       if (file) formData.append('file', file);
 
       const res = await API.post('/notes/upload', formData, {
-        headers: { Authorization: `Bearer ${getToken()}`, 'Content-Type': 'multipart/form-data' }
+        headers: { Authorization: `Bearer ${getToken()}` } // remove explicit multipart Content-Type
       });
       const newNote = res.data;
       onUploaded && onUploaded(newNote);
@@ -36,7 +36,7 @@ export default function UploadForm({ onUploaded }) {
       setFile(null); if (fileInputRef.current) fileInputRef.current.value = '';
       toast.success('Upload successful');
     } catch (err) {
-      console.error(err);
+      console.error('Upload error', err.response?.data || err.message || err);
       const serverMsg = err.response?.data?.message || err.message || 'Upload failed';
       if (serverMsg.toLowerCase().includes('file too large')) {
         setFile(null); if (fileInputRef.current) fileInputRef.current.value = '';
