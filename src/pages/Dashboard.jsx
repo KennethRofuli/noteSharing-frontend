@@ -77,6 +77,14 @@ export default function Dashboard() {
     }
   };
 
+  // Socket.IO registration
+  useEffect(() => {
+  if (currentUserId) {
+    socket.emit('register', currentUserId);
+    console.log('[SOCKET] emitted register for user', currentUserId);
+  }
+  }, [currentUserId]);
+
   // socket events that impact notes or notify user
   useEffect(() => {
     socket.on('note-shared', () => {
