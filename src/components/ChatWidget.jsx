@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import API from '../api/api';
 import socket from '../socket';
 import messageIcon from '../assets/envelope.jpg';
+import '../pages/styles/ChatWidget.css'; // Updated import path
 
 export default function ChatWidget({ currentUserId }) {
   const [chatOpen, setChatOpen] = useState(false);
@@ -10,6 +11,9 @@ export default function ChatWidget({ currentUserId }) {
   const [chatSearch, setChatSearch] = useState('');
   const [chatUsers, setChatUsers] = useState([]);
   const [chatRecipient, setChatRecipient] = useState(null);
+  const [viewMode, setViewMode] = useState('conversations'); // 'conversations' or 'chat'
+  const [conversations, setConversations] = useState([]);
+  const [loadingConversations, setLoadingConversations] = useState(false);
 
   const PAGE_SIZE = 20;
   const [chatPage, setChatPage] = useState(0);
@@ -36,9 +40,31 @@ export default function ChatWidget({ currentUserId }) {
     };
   }, [currentUserId]);
 
+  // Load conversations when chat is opened
+  useEffect(() => {
+    if (!chatOpen || viewMode !== 'conversations') return;
+    
+    const fetchConversations = async () => {
+      setLoadingConversations(true);
+      try {
+        const res = await API.get('/chat/conversations', {
+          headers: { Authorization: `Bearer ${getToken()}` }
+        });
+        setConversations(res.data || []);
+      } catch (err) {
+        console.error('Error fetching conversations', err);
+        setConversations([]);
+      } finally {
+        setLoadingConversations(false);
+      }
+    };
+    
+    fetchConversations();
+  }, [chatOpen, viewMode]);
+
   // fetch users for chat search / verified
   useEffect(() => {
-    if (!chatOpen) return;
+    if (!chatOpen || viewMode !== 'search') return;
     const fetchUsers = async () => {
       try {
         const q = chatSearch.trim();
@@ -51,7 +77,7 @@ export default function ChatWidget({ currentUserId }) {
     };
     const t = setTimeout(fetchUsers, 300);
     return () => clearTimeout(t);
-  }, [chatSearch, chatOpen]);
+  }, [chatSearch, chatOpen, viewMode]);
 
   useEffect(() => {
     socket.on('chat-message', (msg) => {
@@ -62,9 +88,25 @@ export default function ChatWidget({ currentUserId }) {
         if (!belongs) return prev;
         return [...prev, msg];
       });
+      
+      // Also update conversations list if a new message arrives
+      if (chatOpen) {
+        fetchConversations();
+      }
     });
     return () => socket.off('chat-message');
-  }, [chatRecipient, currentUserId]);
+  }, [chatRecipient, currentUserId, chatOpen]);
+
+  const fetchConversations = async () => {
+    try {
+      const res = await API.get('/chat/conversations', {
+        headers: { Authorization: `Bearer ${getToken()}` }
+      });
+      setConversations(res.data || []);
+    } catch (err) {
+      console.error('Error fetching conversations', err);
+    }
+  };
 
   const scrollChatToBottom = (behavior = 'auto') => {
     const el = chatScrollRef.current;
@@ -126,7 +168,10 @@ export default function ChatWidget({ currentUserId }) {
     setChatPage(0);
     setChatHasMore(true);
     setLoadingOlder(false);
-    if (chatRecipient) fetchHistoryPage(chatRecipient._id, 0);
+    if (chatRecipient) {
+      fetchHistoryPage(chatRecipient._id, 0);
+      setViewMode('chat');
+    }
   }, [chatRecipient]);
 
   const handleChatScroll = () => {
@@ -141,7 +186,67 @@ export default function ChatWidget({ currentUserId }) {
     socket.emit('chat-message', msg);
     setChatMessages(prev => [...prev, { ...msg, self: true }]);
     setChatInput('');
+    
+    // After sending a message, update the conversations list
+    setTimeout(() => {
+      fetchConversations();
+    }, 500);
   }, [chatInput, chatRecipient, currentUserId]);
+  
+  const startNewChat = () => {
+    setChatRecipient(null);
+    setChatSearch('');
+    setChatUsers([]);
+    setViewMode('search');
+  };
+  
+  const selectConversation = (conversation) => {
+    setChatRecipient({
+      _id: conversation.userId,
+      name: conversation.name,
+      email: conversation.email
+    });
+    setViewMode('chat');
+  };
+
+  const formatTimestamp = (timestamp) => {
+    const date = new Date(timestamp);
+    const now = new Date();
+    
+    // If today, show only time
+    if (date.toDateString() === now.toDateString()) {
+      return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    }
+    
+    // If within last 7 days, show day name
+    const daysDiff = Math.floor((now - date) / (1000 * 60 * 60 * 24));
+    if (daysDiff < 7) {
+      return date.toLocaleDateString([], { weekday: 'short' });
+    }
+    
+    // Otherwise show date
+    return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
+  };
+
+  // Add this inside your ChatWidget component
+  useEffect(() => {
+    if (chatOpen && viewMode === 'conversations') {
+      console.log('Attempting to fetch conversations');
+      API.get('/chat/conversations', {
+        headers: { Authorization: `Bearer ${getToken()}` }
+      })
+      .then(res => {
+        console.log('Conversations API response:', res.data);
+        setConversations(res.data || []);
+      })
+      .catch(err => {
+        console.error('Error fetching conversations:', err);
+      })
+      .finally(() => {
+        setLoadingConversations(false);
+      });
+    }
+  }, [chatOpen, viewMode]);
 
   return (
     <div className={`chat-widget${chatOpen ? ' open' : ' closed'}`}>
@@ -157,7 +262,14 @@ export default function ChatWidget({ currentUserId }) {
       ) : (
         <div className="chat-window">
           <div className="chat-header">
-            <span>Chat</span>
+            {viewMode === 'chat' && chatRecipient ? (
+              <>
+                <button className="chat-back-btn" onClick={() => setViewMode('conversations')}>←</button>
+                <span>{chatRecipient.name || chatRecipient.email}</span>
+              </>
+            ) : (
+              <span>Messages</span>
+            )}
             <button
               className="chat-close-btn"
               onClick={() => {
@@ -166,65 +278,118 @@ export default function ChatWidget({ currentUserId }) {
                 setChatMessages([]);
                 setChatSearch('');
                 setChatUsers([]);
+                setViewMode('conversations');
               }}
             >×</button>
           </div>
 
-          <div className="chat-search-container">
-            <input
-              className="chat-search-input"
-              placeholder="Search user by email..."
-              value={chatSearch}
-              onChange={e => { setChatSearch(e.target.value); setChatRecipient(null); }}
-            />
-            <ul className="chat-user-list">
-              {chatUsers.map(u => (
-                <li
-                  key={u._id}
-                  className={chatRecipient && chatRecipient._id === u._id ? 'selected' : ''}
-                  onClick={() => { setChatRecipient(u); setChatSearch(u.email); setChatUsers([]); }}
-                >
-                  {u.name ? `${u.name} (${u.email})` : u.email}
-                </li>
-              ))}
-            </ul>
-          </div>
+          {viewMode === 'search' && (
+            <div className="chat-search-container">
+              <div className="chat-search-header">
+                <button className="chat-back-btn" onClick={() => setViewMode('conversations')}>←</button>
+                <input
+                  className="chat-search-input"
+                  placeholder="Search user by email..."
+                  value={chatSearch}
+                  onChange={e => { setChatSearch(e.target.value); setChatRecipient(null); }}
+                  autoFocus
+                />
+              </div>
+              <ul className="chat-user-list">
+                {chatUsers.map(u => (
+                  <li
+                    key={u._id}
+                    className={chatRecipient && chatRecipient._id === u._id ? 'selected' : ''}
+                    onClick={() => { setChatRecipient(u); setChatSearch(u.email); setChatUsers([]); }}
+                  >
+                    {u.name ? `${u.name} (${u.email})` : u.email}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
 
-          <div className="chat-messages" ref={chatScrollRef} onScroll={handleChatScroll} style={{ overflowY: 'auto' }}>
-            {chatRecipient ? (
-              chatMessages.length > 0 ? (
-                chatMessages
-                  .filter(m =>
-                    (m.from === currentUserId && m.to === chatRecipient._id) ||
-                    (m.from === chatRecipient._id && m.to === currentUserId) ||
-                    (m.to === currentUserId && m.from === chatRecipient._id) ||
-                    (m.to === chatRecipient._id && m.from === currentUserId)
-                  )
-                  .map((m, i) => (
-                    <div key={m._id || `${i}-${m.timestamp}`} className={`chat-message-row${(m.from === currentUserId || m.self) ? ' self' : ''}`}>
-                      <span className="chat-message-bubble">{m.text}</span>
-                    </div>
-                  ))
+          {viewMode === 'conversations' && (
+            <div className="chat-conversations-container">
+              <div className="chat-new-message-btn-container">
+                <button className="chat-new-message-btn" onClick={startNewChat}>
+                  New Message
+                </button>
+              </div>
+              {loadingConversations ? (
+                <div className="chat-loading">Loading conversations...</div>
+              ) : conversations.length > 0 ? (
+                <ul className="chat-conversation-list">
+                  {conversations.map((conv) => (
+                    <li 
+                      key={conv.userId} 
+                      className="chat-conversation-item"
+                      onClick={() => selectConversation(conv)}
+                    >
+                      <div className="chat-conversation-details">
+                        <div className="chat-conversation-name">
+                          {conv.name || conv.email}
+                          <span className="chat-conversation-time">
+                            {formatTimestamp(conv.lastMessageTime)}
+                          </span>
+                        </div>
+                        <div className="chat-conversation-preview">
+                          {conv.lastMessage}
+                          {conv.unreadCount > 0 && (
+                            <span className="chat-unread-badge">{conv.unreadCount}</span>
+                          )}
+                        </div>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
               ) : (
-                <div style={{ color: '#888', fontSize: 14, padding: 12 }}>No messages yet — say hello</div>
-              )
-            ) : (
-              <div style={{ color: '#888', fontSize: 14 }}>Select a user to chat</div>
-            )}
-            {loadingOlder && <div style={{ textAlign: 'center', padding: 8, color: '#666' }}>Loading...</div>}
-          </div>
+                <div className="chat-empty-state">
+                  No conversations yet. Start a new message to chat with someone.
+                </div>
+              )}
+            </div>
+          )}
 
-          <div className="chat-input-row">
-            <input
-              className="chat-input"
-              placeholder="Type a message..."
-              value={chatInput}
-              onChange={e => setChatInput(e.target.value)}
-              onKeyDown={e => { if (e.key === 'Enter') sendChat(); }}
-              disabled={!chatRecipient}
-            />
-            <button className="chat-send-btn" onClick={sendChat} disabled={!chatInput.trim() || !chatRecipient}>Send</button>
-          </div>
+          {viewMode === 'chat' && (
+            <>
+              <div className="chat-messages" ref={chatScrollRef} onScroll={handleChatScroll} style={{ overflowY: 'auto' }}>
+                {chatRecipient ? (
+                  chatMessages.length > 0 ? (
+                    chatMessages
+                      .filter(m =>
+                        (m.from === currentUserId && m.to === chatRecipient._id) ||
+                        (m.from === chatRecipient._id && m.to === currentUserId) ||
+                        (m.to === currentUserId && m.from === chatRecipient._id) ||
+                        (m.to === chatRecipient._id && m.from === currentUserId)
+                      )
+                      .map((m, i) => (
+                        <div key={m._id || `${i}-${m.timestamp}`} className={`chat-message-row${(m.from === currentUserId || m.self) ? ' self' : ''}`}>
+                          <span className="chat-message-bubble">{m.text}</span>
+                        </div>
+                      ))
+                  ) : (
+                    <div style={{ color: '#888', fontSize: 14, padding: 12 }}>No messages yet — say hello</div>
+                  )
+                ) : (
+                  <div style={{ color: '#888', fontSize: 14 }}>Select a user to chat</div>
+                )}
+                {loadingOlder && <div style={{ textAlign: 'center', padding: 8, color: '#666' }}>Loading...</div>}
+              </div>
+
+              <div className="chat-input-row">
+                <input
+                  className="chat-input"
+                  placeholder="Type a message..."
+                  value={chatInput}
+                  onChange={e => setChatInput(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') sendChat(); }}
+                  disabled={!chatRecipient}
+                />
+                <button className="chat-send-btn" onClick={sendChat} disabled={!chatInput.trim() || !chatRecipient}>Send</button>
+              </div>
+            </>
+          )}
         </div>
       )}
     </div>
