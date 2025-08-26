@@ -197,6 +197,24 @@ export default function Dashboard() {
   const myNotes = visibleNotes.filter(isOwned);
   const sharedNotes = visibleNotes.filter(n => !isOwned(n) && isSharedWithMe(n));
 
+  const handleUnshare = async (noteId) => {
+    try {
+      await API.post(`/notes/unshare/${noteId}`, {}, {
+        headers: { Authorization: `Bearer ${getToken()}` }
+      });
+      
+      // Remove the note from the shared list
+      setNotes(prev => prev.filter(note => 
+        !(note._id === noteId && !isOwned(note) && isSharedWithMe(note))
+      ));
+      
+      toast.info('Note removed from your shared list');
+    } catch (err) {
+      console.error('Failed to unshare note:', err);
+      toast.error(err.response?.data?.message || 'Failed to remove note from your list');
+    }
+  };
+
   return (
     <>
       <ToastContainer position="top-center" autoClose={2250} hideProgressBar={false} newestOnTop closeOnClick pauseOnHover draggable />
@@ -239,6 +257,7 @@ export default function Dashboard() {
                     isOwned={false}
                     onDownload={handleDownload}
                     sharer={getSharerName(note)}
+                    onUnshare={handleUnshare}
                   />
                 ))}
               </div>
