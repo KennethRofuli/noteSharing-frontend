@@ -67,11 +67,11 @@
 .chat-back-btn {
   background: none;
   border: none;
-  font-size: 18px;
+  font-size: 22px;
   cursor: pointer;
   padding: 5px 10px;
   margin-right: 5px;
-  color: white;
+  color: rgb(0, 0, 0);
 }
 
 .chat-close-btn {
