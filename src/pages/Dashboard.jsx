@@ -203,11 +203,8 @@ export default function Dashboard() {
         headers: { Authorization: `Bearer ${getToken()}` }
       });
       
-      // Remove the note from the shared list
-      setNotes(prev => prev.filter(note => 
-        !(note._id === noteId && !isOwned(note) && isSharedWithMe(note))
-      ));
-      
+      // Simpler approach: Just refetch all notes after unsharing
+      fetchNotes();
       toast.info('Note removed from your shared list');
     } catch (err) {
       console.error('Failed to unshare note:', err);
