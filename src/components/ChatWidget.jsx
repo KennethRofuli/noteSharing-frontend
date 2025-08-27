@@ -190,6 +190,9 @@ export default function ChatWidget({ currentUserId }) {
       timestamp: new Date().toISOString() 
     };
     
+    // Remove this line - don't add message optimistically
+    // setChatMessages(prev => [...prev, { ...msg, self: true }]);
+    
     setChatInput(''); // Clear input immediately for better UX
     
     // Emit the message - let the server handle adding it to the UI
