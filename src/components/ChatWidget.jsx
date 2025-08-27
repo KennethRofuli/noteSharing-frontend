@@ -182,10 +182,23 @@ export default function ChatWidget({ currentUserId }) {
 
   const sendChat = useCallback(() => {
     if (!chatInput.trim() || !chatRecipient) return;
-    const msg = { to: chatRecipient._id, text: chatInput, from: currentUserId, timestamp: new Date().toISOString() };
-    socket.emit('chat-message', msg);
-    setChatMessages(prev => [...prev, { ...msg, self: true }]);
-    setChatInput('');
+    
+    const msg = { 
+      to: String(chatRecipient._id),
+      text: chatInput, 
+      from: String(currentUserId),
+      timestamp: new Date().toISOString() 
+    };
+    
+    setChatInput(''); // Clear input immediately for better UX
+    
+    // Emit the message - let the server handle adding it to the UI
+    socket.emit('chat-message', msg, (acknowledgment) => {
+      if (acknowledgment && acknowledgment.error) {
+        console.error('Failed to send message:', acknowledgment.error);
+        // Optionally show error message to user
+      }
+    });
     
     // After sending a message, update the conversations list
     setTimeout(() => {
