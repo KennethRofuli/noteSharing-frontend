@@ -13,6 +13,7 @@ import Sidebar from '../components/Sidebar';
 import ShareModal from '../components/ShareModal';
 import ConfirmModal from '../components/ConfirmModal';
 import NoteCard from '../components/NoteCard';
+import NotificationBell from '../components/NotificationBell';
 
 export default function Dashboard() {
   const navigate = useNavigate();
@@ -22,9 +23,9 @@ export default function Dashboard() {
   const [message, setMessage] = useState('');
   const [shareNoteId, setShareNoteId] = useState(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
+  const [currentUserId, setCurrentUserId] = useState(null);
 
   const getToken = () => localStorage.getItem('token');
-  const [currentUserId, setCurrentUserId] = useState(null);
 
   const parseJwt = (t) => {
     try {
@@ -42,7 +43,11 @@ export default function Dashboard() {
 
   useEffect(() => {
     const t = getToken();
-    if (!t) { navigate('/login'); return; }
+    if (!t) { 
+      navigate('/login'); 
+      return; 
+    }
+    
     const payload = parseJwt(t);
     const id = payload?.id || payload?._id || payload?.userId || payload?.sub || null;
     if (id) setCurrentUserId(id.toString());
@@ -53,7 +58,9 @@ export default function Dashboard() {
     } else {
       const fetchProfile = async () => {
         try {
-          const res = await API.get('/auth/me', { headers: { Authorization: `Bearer ${t}` } });
+          const res = await API.get('/auth/me', { 
+            headers: { Authorization: `Bearer ${t}` } 
+          });
           setCurrentUserName(res.data.name || res.data.email || null);
         } catch (err) {
           console.error('fetchProfile', err);
@@ -63,13 +70,15 @@ export default function Dashboard() {
       };
       fetchProfile();
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const fetchNotes = async (tokenParam) => {
     const t = tokenParam || getToken();
     try {
-      const res = await API.get('/notes', { headers: { Authorization: `Bearer ${t}` } });
+      const res = await API.get('/notes', { 
+        headers: { Authorization: `Bearer ${t}` } 
+      });
       setNotes(res.data || []);
     } catch (err) {
       console.error(err);
@@ -77,29 +86,49 @@ export default function Dashboard() {
     }
   };
 
-  // Socket.IO registration
+  // Setup Socket.IO connection and event listeners
   useEffect(() => {
-  if (currentUserId) {
-    socket.emit('register', currentUserId);
-    console.log('[SOCKET] emitted register for user', currentUserId);
-  }
-  }, [currentUserId]);
+    // Register user with socket when ID is available
+    if (currentUserId) {
+      socket.emit('register', currentUserId);
+      console.log('[SOCKET] emitted register for user', currentUserId);
+    }
 
-  // socket events that impact notes or notify user
-  useEffect(() => {
-    socket.on('note-shared', () => {
+    // Debug socket connections
+    socket.on('connect', () => {
+      console.log('Socket connected with ID:', socket.id);
+    });
+    
+    socket.on('disconnect', () => {
+      console.log('Socket disconnected');
+    });
+    
+    // Note events
+    socket.on('note-shared', (data) => {
+      console.log('Received note-shared event:', data);
       fetchNotes();
       toast.info('A note was shared with you!');
     });
-    socket.on('note-deleted', () => {
+    
+    socket.on('note-deleted', (data) => {
+      console.log('Received note-deleted event:', data);
       fetchNotes();
       toast.error('A note shared with you was deleted.');
     });
+    
+    socket.on('new_notification', (data) => {
+      console.log('Received new_notification event:', data);
+    });
+    
+    // Cleanup function to remove all listeners
     return () => {
+      socket.off('connect');
+      socket.off('disconnect');
       socket.off('note-shared');
       socket.off('note-deleted');
+      socket.off('new_notification');
     };
-  }, []);
+  }, [currentUserId]);
 
   const handleUploadAdded = (newNote) => {
     setNotes(prev => [newNote, ...prev]);
@@ -116,7 +145,9 @@ export default function Dashboard() {
     const noteId = confirmDeleteId;
     setConfirmDeleteId(null);
     try {
-      await API.delete(`/notes/delete/${noteId}`, { headers: { Authorization: `Bearer ${getToken()}` } });
+      await API.delete(`/notes/delete/${noteId}`, { 
+        headers: { Authorization: `Bearer ${getToken()}` } 
+      });
       setNotes(prev => prev.filter(n => n._id !== noteId));
       toast.error('Note deleted');
     } catch (err) {
@@ -132,6 +163,8 @@ export default function Dashboard() {
         responseType: 'blob',
         headers: { Authorization: `Bearer ${getToken()}` }
       });
+      
+      // Create download link
       const blob = new Blob([res.data]);
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -140,14 +173,78 @@ export default function Dashboard() {
       a.download = filename;
       document.body.appendChild(a);
       a.click();
-      a.remove();
-      window.URL.revokeObjectURL(url);
+      
+      // Cleanup
+      setTimeout(() => {
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(url);
+      }, 100);
     } catch (err) {
       console.error(err);
       toast.error(err.response?.data?.message || 'Download failed');
     }
   };
 
+  const handleUnshare = async (noteId) => {
+    try {
+      await API.post(`/notes/unshare/${noteId}`, {}, {
+        headers: { Authorization: `Bearer ${getToken()}` }
+      });
+      fetchNotes();
+      toast.info('Note removed from your shared list');
+    } catch (err) {
+      console.error('Failed to unshare note:', err);
+      toast.error(err.response?.data?.message || 'Failed to remove note from your list');
+    }
+  };
+
+  // Helper functions for note filtering and data extraction
+  const isOwned = (note) => {
+    if (!note?.uploadedBy || !currentUserId) return false;
+    const uploaderId = note.uploadedBy._id ? note.uploadedBy._id.toString() : note.uploadedBy.toString();
+    return uploaderId === currentUserId.toString();
+  };
+
+  const isSharedWithMe = (note) => {
+    if (!note?.sharedWith || !currentUserId) return false;
+    return note.sharedWith.some(sw => {
+      if (sw?.recipient) return sw.recipient.toString() === currentUserId.toString();
+      const sid = sw?._id ? sw._id.toString() : (sw?.toString ? sw.toString() : '');
+      return sid === currentUserId.toString();
+    });
+  };
+
+  const getSharerName = (note) => {
+    if (!note) return null;
+    
+    // Find the relevant sharing record
+    const entry = Array.isArray(note.sharedWith)
+      ? note.sharedWith.find(sw => {
+          const sid = sw?._id ? sw._id.toString() : (sw?.toString ? sw.toString() : '');
+          return sid === currentUserId?.toString() || 
+                 sw?.user?._id === currentUserId?.toString() || 
+                 sw?.recipientId === currentUserId?.toString();
+        })
+      : null;
+      
+    // Extract name from sharing record
+    if (entry) {
+      const name = entry.sharedByName || entry.byName || entry.sharerName || 
+                   entry.sharedBy?.name || entry.sharedBy;
+      if (name) return typeof name === 'object' ? (name.name || name.email) : name;
+    }
+    
+    // Fallback to uploader info
+    const uploader = note.uploadedBy;
+    if (uploader) {
+      return uploader.name || uploader.email || 
+             (uploader._id ? uploader._id.toString() : uploader.toString());
+    }
+    
+    return null;
+  };
+
+  // Course filtering
   const courseCounts = notes.reduce((acc, note) => {
     acc[note.courseCode] = (acc[note.courseCode] || 0) + 1;
     return acc;
@@ -157,39 +254,7 @@ export default function Dashboard() {
     setSelectedCourse(course);
   };
 
-  const isOwned = (note) => {
-    if (!note || !note.uploadedBy || !currentUserId) return false;
-    const uploaderId = note.uploadedBy._id ? note.uploadedBy._id.toString() : note.uploadedBy.toString();
-    return uploaderId === currentUserId.toString();
-  };
-
-  const isSharedWithMe = (note) => {
-    if (!note || !note.sharedWith || !currentUserId) return false;
-    return note.sharedWith.some(sw => {
-      if (sw && sw.recipient) return sw.recipient.toString() === currentUserId.toString();
-      const sid = sw?._id ? sw._id.toString() : (sw?.toString ? sw.toString() : '');
-      return sid === currentUserId.toString();
-    });
-  };
-
-  const getSharerName = (note) => {
-    if (!note) return null;
-    const entry = Array.isArray(note.sharedWith)
-      ? note.sharedWith.find(sw => {
-          const sid = sw?._id ? sw._id.toString() : (sw?.toString ? sw.toString() : '');
-          return sid === currentUserId?.toString() || sw?.user?._id === currentUserId?.toString() || sw?.recipientId === currentUserId?.toString();
-        })
-      : null;
-    if (entry) {
-      const name = entry.sharedByName || entry.byName || entry.sharerName || entry.sharedBy?.name || entry.sharedBy;
-      if (name) return typeof name === 'object' ? (name.name || name.email) : name;
-    }
-    const uploader = note.uploadedBy;
-    if (uploader) return uploader.name || uploader.email || (uploader._id ? uploader._id.toString() : uploader.toString());
-    return null;
-  };
-
-  // derive visible notes
+  // Filter notes based on selection
   const visibleNotes = (selectedCourse && selectedCourse !== 'all')
     ? notes.filter(n => n.courseCode === selectedCourse)
     : notes;
@@ -197,35 +262,41 @@ export default function Dashboard() {
   const myNotes = visibleNotes.filter(isOwned);
   const sharedNotes = visibleNotes.filter(n => !isOwned(n) && isSharedWithMe(n));
 
-  const handleUnshare = async (noteId) => {
-    try {
-      await API.post(`/notes/unshare/${noteId}`, {}, {
-        headers: { Authorization: `Bearer ${getToken()}` }
-      });
-      
-      // Simpler approach: Just refetch all notes after unsharing
-      fetchNotes();
-      toast.info('Note removed from your shared list');
-    } catch (err) {
-      console.error('Failed to unshare note:', err);
-      toast.error(err.response?.data?.message || 'Failed to remove note from your list');
-    }
-  };
-
   return (
     <>
-      <ToastContainer position="top-center" autoClose={2250} hideProgressBar={false} newestOnTop closeOnClick pauseOnHover draggable />
+      <ToastContainer 
+        position="top-center" 
+        autoClose={2250} 
+        hideProgressBar={false} 
+        newestOnTop 
+        closeOnClick 
+        pauseOnHover 
+        draggable 
+      />
+      
       <div className="dashboard-container">
-        <Sidebar notesCount={notes.length} courseCounts={courseCounts} selectedCourse={selectedCourse} onCourseClick={handleCourseClick} />
+        <Sidebar 
+          notesCount={notes.length} 
+          courseCounts={courseCounts} 
+          selectedCourse={selectedCourse} 
+          onCourseClick={handleCourseClick} 
+        />
 
         <div className="content">
           <div className="dashboard-header">
-            <h2>{currentUserName && <div className="user-greeting">Hello, {currentUserName}</div>}</h2>
-            <button className="logout-btn" onClick={handleLogout}>Logout</button>
+            <h2>
+              {currentUserName && (
+                <div className="user-greeting">Hello, {currentUserName}</div>
+              )}
+            </h2>
+            <div className="header-actions">
+              <NotificationBell />
+              <button className="logout-btn" onClick={handleLogout}>Logout</button>
+            </div>
           </div>
 
           <UploadForm onUploaded={handleUploadAdded} />
-          <div>{message}</div>
+          {message && <div>{message}</div>}
 
           <div className="notes-columns">
             <div className="notes-column">

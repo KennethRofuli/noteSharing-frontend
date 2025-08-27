@@ -1,0 +1,50 @@
+/* Highlight unread conversations */
+.conversation-item.unread {
+  background-color: #e3f2fd;
+  border-left: 4px solid #2196f3;
+  font-weight: 600;
+}
+
+.conversation-item.unread:hover {
+  background-color: #bbdefb;
+}
+
+/* Unread count badge */
+.unread-badge {
+  background-color: #f44336;
+  color: white;
+  border-radius: 50%;
+  min-width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: bold;
+  margin-left: auto;
+}
+
+/* Highlight unread messages in chat */
+.chat-message.unread {
+  background-color: #f0f8ff;
+  border-left: 3px solid #2196f3;
+  animation: fadeIn 0.3s ease-in;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(-10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* Chat widget button with unread indicator */
+.chat-toggle-btn.has-unread::after {
+  content: '';
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 12px;
+  height: 12px;
+  background-color: #f44336;
+  border-radius: 50%;
+  border: 2px solid white;
+}

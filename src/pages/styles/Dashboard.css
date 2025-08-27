@@ -356,7 +356,7 @@ html, body, #root {
 /* layout cards in three columns inside each "My / Shared" column */
 .notes-grid-column {
   display: grid;
-  grid-template-columns: repeat(2, 1fr); /* 3 columns */
+  grid-template-columns: repeat(2, 1fr); /* 2 columns */
   gap: 14px;
   grid-auto-rows: auto;
   align-content: start;
@@ -539,8 +539,14 @@ html, body, #root {
   flex: 1;
 }
 
-.chat-send-btn {
-  /* style as needed */
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.notification-bell-container {
+  margin-right: 5px;
 }
 
 
