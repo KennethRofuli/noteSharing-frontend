@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import API from '../api/api';
 import socket from '../socket';
 import messageIcon from '../assets/envelope.jpg';
-import '../pages/styles/ChatWidget.css'; // Updated import path
+import '../pages/styles/ChatWidget.css';
 
 export default function ChatWidget({ currentUserId }) {
   const [chatOpen, setChatOpen] = useState(false);
@@ -11,9 +11,11 @@ export default function ChatWidget({ currentUserId }) {
   const [chatSearch, setChatSearch] = useState('');
   const [chatUsers, setChatUsers] = useState([]);
   const [chatRecipient, setChatRecipient] = useState(null);
-  const [viewMode, setViewMode] = useState('conversations'); // 'conversations' or 'chat'
+  const [viewMode, setViewMode] = useState('conversations');
   const [conversations, setConversations] = useState([]);
   const [loadingConversations, setLoadingConversations] = useState(false);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [hasNewMessage, setHasNewMessage] = useState(false);
 
   const PAGE_SIZE = 20;
   const [chatPage, setChatPage] = useState(0);
@@ -24,6 +26,105 @@ export default function ChatWidget({ currentUserId }) {
 
   const getToken = () => localStorage.getItem('token');
 
+  // Fetch conversations function
+  const fetchConversations = useCallback(async () => {
+    if (!currentUserId) return;
+    
+    setLoadingConversations(true);
+    try {
+      const res = await API.get('/chat/conversations', {
+        headers: { Authorization: `Bearer ${getToken()}` }
+      });
+      console.log('Conversations fetched:', res.data);
+      setConversations(res.data || []);
+      
+      // Calculate total unread count
+      const totalUnread = (res.data || []).reduce((sum, conv) => sum + (conv.unreadCount || 0), 0);
+      setUnreadCount(totalUnread);
+      setHasNewMessage(totalUnread > 0);
+      
+      // Store unread count in localStorage
+      localStorage.setItem(`unreadCount_${currentUserId}`, totalUnread.toString());
+    } catch (err) {
+      console.error('Error fetching conversations', err);
+      setConversations([]);
+    } finally {
+      setLoadingConversations(false);
+    }
+  }, [currentUserId]);
+
+  // Load unread count from localStorage on component mount
+  useEffect(() => {
+    if (currentUserId) {
+      // Load stored unread count first
+      const storedUnreadCount = localStorage.getItem(`unreadCount_${currentUserId}`);
+      if (storedUnreadCount) {
+        const count = parseInt(storedUnreadCount, 10);
+        setUnreadCount(count);
+        setHasNewMessage(count > 0);
+      }
+      
+      // Then fetch fresh data
+      fetchConversations();
+    }
+  }, [currentUserId, fetchConversations]);
+
+  // Update localStorage when unread count changes
+  useEffect(() => {
+    if (currentUserId && unreadCount >= 0) {
+      localStorage.setItem(`unreadCount_${currentUserId}`, unreadCount.toString());
+    }
+  }, [unreadCount, currentUserId]);
+
+  // Update conversation locally without fetching from server
+  const updateConversationLocally = useCallback((message) => {
+    setConversations(prev => {
+      const updated = [...prev];
+      const otherUserId = message.from === currentUserId ? message.to : message.from;
+      
+      // Find existing conversation
+      const existingIndex = updated.findIndex(conv => conv.userId === otherUserId);
+      
+      if (existingIndex >= 0) {
+        // Update existing conversation
+        updated[existingIndex] = {
+          ...updated[existingIndex],
+          lastMessage: message.text,
+          lastMessageTime: message.timestamp,
+          // Only increase unread count if it's not our message and chat is closed or not in this conversation
+          unreadCount: message.from !== currentUserId && (!chatOpen || (chatRecipient && chatRecipient._id !== message.from))
+            ? (updated[existingIndex].unreadCount || 0) + 1
+            : updated[existingIndex].unreadCount || 0
+        };
+        
+        // Move to top
+        const conversation = updated.splice(existingIndex, 1)[0];
+        updated.unshift(conversation);
+      } else if (message.from !== currentUserId) {
+        // Add new conversation for incoming message
+        // We'll need to fetch user details for this, but for now just add basic info
+        updated.unshift({
+          userId: message.from,
+          name: '', // Will be empty until we fetch user details
+          email: '',
+          lastMessage: message.text,
+          lastMessageTime: message.timestamp,
+          unreadCount: !chatOpen || (chatRecipient && chatRecipient._id !== message.from) ? 1 : 0
+        });
+      }
+      
+      return updated;
+    });
+  }, [currentUserId, chatOpen, chatRecipient]);
+
+  // Fetch conversations on component mount
+  useEffect(() => {
+    if (currentUserId) {
+      fetchConversations();
+    }
+  }, [currentUserId, fetchConversations]);
+
+  // Register user with socket
   useEffect(() => {
     if (!currentUserId) return;
     const register = () => {
@@ -40,29 +141,14 @@ export default function ChatWidget({ currentUserId }) {
     };
   }, [currentUserId]);
 
-  // Load conversations when chat is opened
+  // Refresh conversations when chat is opened
   useEffect(() => {
-    if (!chatOpen || viewMode !== 'conversations') return;
-    
-    const fetchConversations = async () => {
-      setLoadingConversations(true);
-      try {
-        const res = await API.get('/chat/conversations', {
-          headers: { Authorization: `Bearer ${getToken()}` }
-        });
-        setConversations(res.data || []);
-      } catch (err) {
-        console.error('Error fetching conversations', err);
-        setConversations([]);
-      } finally {
-        setLoadingConversations(false);
-      }
-    };
-    
-    fetchConversations();
-  }, [chatOpen, viewMode]);
+    if (chatOpen && viewMode === 'conversations') {
+      fetchConversations();
+    }
+  }, [chatOpen, viewMode, fetchConversations]);
 
-  // fetch users for chat search / verified
+  // fetch users for chat search
   useEffect(() => {
     if (!chatOpen || viewMode !== 'search') return;
     const fetchUsers = async () => {
@@ -79,8 +165,15 @@ export default function ChatWidget({ currentUserId }) {
     return () => clearTimeout(t);
   }, [chatSearch, chatOpen, viewMode]);
 
+  // Listen for incoming chat messages
   useEffect(() => {
-    socket.on('chat-message', (msg) => {
+    const handleChatMessage = (msg) => {
+      console.log('Received chat message:', msg);
+      
+      if (msg.from === currentUserId) {
+        return;
+      }
+      
       setChatMessages(prev => {
         if (!chatRecipient) return prev;
         const belongs = (msg.from === currentUserId && msg.to === chatRecipient._id) ||
@@ -89,24 +182,47 @@ export default function ChatWidget({ currentUserId }) {
         return [...prev, msg];
       });
       
-      // Also update conversations list if a new message arrives
-      if (chatOpen) {
-        fetchConversations();
+      updateConversationLocally(msg);
+      
+      if (!chatOpen || (chatRecipient && chatRecipient._id !== msg.from)) {
+        setUnreadCount(prev => {
+          const newCount = prev + 1;
+          // Store updated count in localStorage
+          localStorage.setItem(`unreadCount_${currentUserId}`, newCount.toString());
+          return newCount;
+        });
+        setHasNewMessage(true);
       }
-    });
-    return () => socket.off('chat-message');
-  }, [chatRecipient, currentUserId, chatOpen]);
+    };
 
-  const fetchConversations = async () => {
-    try {
-      const res = await API.get('/chat/conversations', {
-        headers: { Authorization: `Bearer ${getToken()}` }
-      });
-      setConversations(res.data || []);
-    } catch (err) {
-      console.error('Error fetching conversations', err);
-    }
-  };
+    const handleNewMessage = (data) => {
+      console.log('Received new message notification:', data);
+      
+      if (data.from === currentUserId) {
+        return;
+      }
+      
+      updateConversationLocally(data);
+      
+      if (!chatOpen) {
+        setUnreadCount(prev => {
+          const newCount = prev + 1;
+          // Store updated count in localStorage
+          localStorage.setItem(`unreadCount_${currentUserId}`, newCount.toString());
+          return newCount;
+        });
+        setHasNewMessage(true);
+      }
+    };
+
+    socket.on('chat-message', handleChatMessage);
+    socket.on('new_message', handleNewMessage);
+
+    return () => {
+      socket.off('chat-message', handleChatMessage);
+      socket.off('new_message', handleNewMessage);
+    };
+  }, [chatRecipient, currentUserId, chatOpen, updateConversationLocally]);
 
   const scrollChatToBottom = (behavior = 'auto') => {
     const el = chatScrollRef.current;
@@ -182,16 +298,25 @@ export default function ChatWidget({ currentUserId }) {
 
   const sendChat = useCallback(() => {
     if (!chatInput.trim() || !chatRecipient) return;
-    const msg = { to: chatRecipient._id, text: chatInput, from: currentUserId, timestamp: new Date().toISOString() };
-    socket.emit('chat-message', msg);
-    setChatMessages(prev => [...prev, { ...msg, self: true }]);
-    setChatInput('');
     
-    // After sending a message, update the conversations list
-    setTimeout(() => {
-      fetchConversations();
-    }, 500);
-  }, [chatInput, chatRecipient, currentUserId]);
+    const msg = { 
+      to: chatRecipient._id, 
+      text: chatInput, 
+      from: currentUserId, 
+      timestamp: new Date().toISOString() 
+    };
+    
+    // Emit the message
+    socket.emit('chat-message', msg);
+    
+    // Add to local messages immediately
+    setChatMessages(prev => [...prev, { ...msg, self: true }]);
+    
+    // Update conversations locally (without fetching from server)
+    updateConversationLocally(msg);
+    
+    setChatInput('');
+  }, [chatInput, chatRecipient, currentUserId, updateConversationLocally]);
   
   const startNewChat = () => {
     setChatRecipient(null);
@@ -207,57 +332,118 @@ export default function ChatWidget({ currentUserId }) {
       email: conversation.email
     });
     setViewMode('chat');
+    
+    const conversationUnreadCount = conversation.unreadCount || 0;
+    if (conversationUnreadCount > 0) {
+      setUnreadCount(prev => {
+        const newCount = Math.max(0, prev - conversationUnreadCount);
+        // Store updated count in localStorage
+        localStorage.setItem(`unreadCount_${currentUserId}`, newCount.toString());
+        return newCount;
+      });
+      setHasNewMessage(prev => {
+        const newCount = Math.max(0, unreadCount - conversationUnreadCount);
+        return newCount > 0;
+      });
+      
+      setConversations(prev => prev.map(conv => 
+        conv.userId === conversation.userId 
+          ? { ...conv, unreadCount: 0 }
+          : conv
+      ));
+    }
   };
 
   const formatTimestamp = (timestamp) => {
     const date = new Date(timestamp);
     const now = new Date();
     
-    // If today, show only time
     if (date.toDateString() === now.toDateString()) {
       return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     }
     
-    // If within last 7 days, show day name
     const daysDiff = Math.floor((now - date) / (1000 * 60 * 60 * 24));
     if (daysDiff < 7) {
       return date.toLocaleDateString([], { weekday: 'short' });
     }
     
-    // Otherwise show date
     return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
   };
 
-  // Add this inside your ChatWidget component
+  const handleToggle = () => {
+    setChatOpen(!chatOpen);
+    if (!chatOpen) {
+      // Store that we've opened chat (reduces unread count)
+      localStorage.setItem(`unreadCount_${currentUserId}`, '0');
+      setUnreadCount(0);
+      setHasNewMessage(false);
+      fetchConversations();
+    }
+  };
+
+  // Clear localStorage on logout
   useEffect(() => {
-    if (chatOpen && viewMode === 'conversations') {
-      console.log('Attempting to fetch conversations');
-      API.get('/chat/conversations', {
-        headers: { Authorization: `Bearer ${getToken()}` }
-      })
-      .then(res => {
-        console.log('Conversations API response:', res.data);
-        setConversations(res.data || []);
-      })
-      .catch(err => {
-        console.error('Error fetching conversations:', err);
-      })
-      .finally(() => {
-        setLoadingConversations(false);
+    const handleLogout = () => {
+      if (currentUserId) {
+        localStorage.removeItem(`unreadCount_${currentUserId}`);
+      }
+    };
+    
+    // You might want to call this when user actually logs out
+    // For now, we'll clean up on component unmount if no currentUserId
+    if (!currentUserId) {
+      // Clear all unread counts (optional)
+      Object.keys(localStorage).forEach(key => {
+        if (key.startsWith('unreadCount_')) {
+          localStorage.removeItem(key);
+        }
       });
     }
-  }, [chatOpen, viewMode]);
+    
+    return handleLogout;
+  }, [currentUserId]);
+
+  // Expose function globally for opening chat from notifications
+  useEffect(() => {
+    window.openChat = (userId) => {
+      const user = conversations.find(conv => conv.userId === userId);
+      if (user) {
+        selectConversation(user);
+        setChatOpen(true);
+      } else {
+        API.get(`/users/${userId}`, {
+          headers: { Authorization: `Bearer ${getToken()}` }
+        }).then(res => {
+          setChatRecipient(res.data);
+          setViewMode('chat');
+          setChatOpen(true);
+        }).catch(err => {
+          console.error('Error fetching user for chat:', err);
+        });
+      }
+    };
+
+    return () => {
+      delete window.openChat;
+    };
+  }, [conversations]);
 
   return (
     <div className={`chat-widget${chatOpen ? ' open' : ' closed'}`}>
       {!chatOpen ? (
         <button
-          className="chat-fab"
-          onClick={() => setChatOpen(true)}
+          className={`chat-fab ${hasNewMessage ? 'has-notification' : ''}`}
+          onClick={handleToggle}
           aria-label="New message"
           title="New message"
         >
-          <img src={messageIcon} alt="New message" />
+          <i className="fas fa-comments"></i>
+          {unreadCount > 0 && (
+            <span className="unread-badge">{unreadCount > 99 ? '99+' : unreadCount}</span>
+          )}
+          {hasNewMessage && (
+            <i className="fas fa-exclamation notification-indicator"></i>
+          )}
         </button>
       ) : (
         <div className="chat-window">
