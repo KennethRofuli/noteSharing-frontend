@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import API from '../api/api';
 import socket from '../socket';
-import messageIcon from '../assets/envelope.jpg';
 import '../pages/styles/ChatWidget.css';
 
 export default function ChatWidget({ currentUserId }) {
