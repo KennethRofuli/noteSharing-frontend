@@ -410,6 +410,33 @@ export default function ChatWidget({ currentUserId }) {
     };
   }, [conversations]);
 
+  // Add this utility function near the top of the component, after the imports
+  const linkifyText = (text) => {
+    // Regular expression to match URLs
+    const urlRegex = /(https?:\/\/[^\s]+)/g;
+    
+    // Split text by URLs and create elements
+    const parts = text.split(urlRegex);
+    
+    return parts.map((part, index) => {
+      if (urlRegex.test(part)) {
+        return (
+          <a
+            key={index}
+            href={part} 
+            target="_blank"
+            rel="noopener noreferrer"
+            className="chat-message-link"
+            onClick={(e) => e.stopPropagation()} // Prevent event bubbling
+          >
+            {part}
+          </a>
+        );
+      }
+      return part;
+    });
+  };
+
   return (
     <div className={`chat-widget${chatOpen ? ' open' : ' closed'}`}>
       {!chatOpen ? (
@@ -499,7 +526,11 @@ export default function ChatWidget({ currentUserId }) {
                           </span>
                         </div>
                         <div className="chat-conversation-preview">
-                          {conv.lastMessage}
+                          <span className="chat-conversation-text">
+                            {conv.lastMessage && conv.lastMessage.length > 50 
+                              ? `${conv.lastMessage.substring(0, 50)}...` 
+                              : conv.lastMessage}
+                          </span>
                           {conv.unreadCount > 0 && (
                             <span className="chat-unread-badge">{conv.unreadCount}</span>
                           )}
@@ -530,7 +561,9 @@ export default function ChatWidget({ currentUserId }) {
                       )
                       .map((m, i) => (
                         <div key={m._id || `${i}-${m.timestamp}`} className={`chat-message-row${(m.from === currentUserId || m.self) ? ' self' : ''}`}>
-                          <span className="chat-message-bubble">{m.text}</span>
+                          <span className="chat-message-bubble">
+                            {linkifyText(m.text)}
+                          </span>
                         </div>
                       ))
                   ) : (
