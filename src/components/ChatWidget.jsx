@@ -423,9 +423,6 @@ export default function ChatWidget({ currentUserId }) {
           {unreadCount > 0 && (
             <span className="unread-badge">{unreadCount > 99 ? '99+' : unreadCount}</span>
           )}
-          {hasNewMessage && (
-            <i className="fas fa-exclamation notification-indicator"></i>
-          )}
         </button>
       ) : (
         <div className="chat-window">
