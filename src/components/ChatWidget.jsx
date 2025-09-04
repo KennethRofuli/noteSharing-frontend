@@ -410,32 +410,37 @@ export default function ChatWidget({ currentUserId }) {
     };
   }, [conversations]);
 
-  // Add this utility function near the top of the component, after the imports
-  const linkifyText = (text) => {
-    // Regular expression to match URLs
-    const urlRegex = /(https?:\/\/[^\s]+)/g;
-    
-    // Split text by URLs and create elements
-    const parts = text.split(urlRegex);
-    
-    return parts.map((part, index) => {
-      if (urlRegex.test(part)) {
-        return (
-          <a
-            key={index}
-            href={part} 
-            target="_blank"
-            rel="noopener noreferrer"
-            className="chat-message-link"
-            onClick={(e) => e.stopPropagation()} // Prevent event bubbling
-          >
-            {part}
-          </a>
-        );
+  // Enhanced linkify function with better URL detection
+const linkifyText = (text) => {
+  // More comprehensive URL regex
+  const urlRegex = /(https?:\/\/[^\s]+|www\.[^\s]+|[a-zA-Z0-9][a-zA-Z0-9-]{1,61}[a-zA-Z0-9]\.[a-zA-Z]{2,}[^\s]*)/g;
+  
+  const parts = text.split(urlRegex);
+  
+  return parts.map((part, index) => {
+    if (urlRegex.test(part)) {
+      // Add protocol if missing
+      let href = part;
+      if (!part.startsWith('http://') && !part.startsWith('https://')) {
+        href = `https://${part}`;
       }
-      return part;
-    });
-  };
+      
+      return (
+        <a
+          key={index}
+          href={href}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="chat-message-link"
+          onClick={(e) => e.stopPropagation()}
+        >
+          {part}
+        </a>
+      );
+    }
+    return part;
+  });
+};
 
   return (
     <div className={`chat-widget${chatOpen ? ' open' : ' closed'}`}>
