@@ -25,7 +25,22 @@ export default function ChatWidget({ currentUserId }) {
 
   const getToken = () => localStorage.getItem('token');
 
-  // Fetch conversations function
+  // Add function to fetch unread count from backend
+  const fetchUnreadCount = useCallback(async () => {
+    if (!currentUserId) return;
+    
+    try {
+      const res = await API.get('/chat/unread-count', {
+        headers: { Authorization: `Bearer ${getToken()}` }
+      });
+      setUnreadCount(res.data.count || 0);
+      setHasNewMessage(res.data.count > 0);
+    } catch (err) {
+      console.error('Error fetching unread count', err);
+    }
+  }, [currentUserId]);
+
+  // Fetch conversations function - remove unread count calculation
   const fetchConversations = useCallback(async () => {
     if (!currentUserId) return;
     
@@ -36,14 +51,6 @@ export default function ChatWidget({ currentUserId }) {
       });
       console.log('Conversations fetched:', res.data);
       setConversations(res.data || []);
-      
-      // Calculate total unread count
-      const totalUnread = (res.data || []).reduce((sum, conv) => sum + (conv.unreadCount || 0), 0);
-      setUnreadCount(totalUnread);
-      setHasNewMessage(totalUnread > 0);
-      
-      // Store unread count in localStorage
-      localStorage.setItem(`unreadCount_${currentUserId}`, totalUnread.toString());
     } catch (err) {
       console.error('Error fetching conversations', err);
       setConversations([]);
@@ -52,21 +59,13 @@ export default function ChatWidget({ currentUserId }) {
     }
   }, [currentUserId]);
 
-  // Load unread count from localStorage on component mount
+  // Load data on component mount
   useEffect(() => {
     if (currentUserId) {
-      // Load stored unread count first
-      const storedUnreadCount = localStorage.getItem(`unreadCount_${currentUserId}`);
-      if (storedUnreadCount) {
-        const count = parseInt(storedUnreadCount, 10);
-        setUnreadCount(count);
-        setHasNewMessage(count > 0);
-      }
-      
-      // Then fetch fresh data
+      fetchUnreadCount(); // Fetch unread count from backend
       fetchConversations();
     }
-  }, [currentUserId, fetchConversations]);
+  }, [currentUserId, fetchUnreadCount, fetchConversations]);
 
   // Update localStorage when unread count changes
   useEffect(() => {
@@ -115,13 +114,6 @@ export default function ChatWidget({ currentUserId }) {
       return updated;
     });
   }, [currentUserId, chatOpen, chatRecipient]);
-
-  // Fetch conversations on component mount
-  useEffect(() => {
-    if (currentUserId) {
-      fetchConversations();
-    }
-  }, [currentUserId, fetchConversations]);
 
   // Register user with socket
   useEffect(() => {
@@ -184,12 +176,7 @@ export default function ChatWidget({ currentUserId }) {
       updateConversationLocally(msg);
       
       if (!chatOpen || (chatRecipient && chatRecipient._id !== msg.from)) {
-        setUnreadCount(prev => {
-          const newCount = prev + 1;
-          // Store updated count in localStorage
-          localStorage.setItem(`unreadCount_${currentUserId}`, newCount.toString());
-          return newCount;
-        });
+        setUnreadCount(prev => prev + 1);
         setHasNewMessage(true);
       }
     };
@@ -204,12 +191,7 @@ export default function ChatWidget({ currentUserId }) {
       updateConversationLocally(data);
       
       if (!chatOpen) {
-        setUnreadCount(prev => {
-          const newCount = prev + 1;
-          // Store updated count in localStorage
-          localStorage.setItem(`unreadCount_${currentUserId}`, newCount.toString());
-          return newCount;
-        });
+        setUnreadCount(prev => prev + 1);
         setHasNewMessage(true);
       }
     };
@@ -334,12 +316,7 @@ export default function ChatWidget({ currentUserId }) {
     
     const conversationUnreadCount = conversation.unreadCount || 0;
     if (conversationUnreadCount > 0) {
-      setUnreadCount(prev => {
-        const newCount = Math.max(0, prev - conversationUnreadCount);
-        // Store updated count in localStorage
-        localStorage.setItem(`unreadCount_${currentUserId}`, newCount.toString());
-        return newCount;
-      });
+      setUnreadCount(prev => Math.max(0, prev - conversationUnreadCount));
       setHasNewMessage(prev => {
         const newCount = Math.max(0, unreadCount - conversationUnreadCount);
         return newCount > 0;
@@ -350,6 +327,15 @@ export default function ChatWidget({ currentUserId }) {
           ? { ...conv, unreadCount: 0 }
           : conv
       ));
+
+      // Mark messages as read on backend
+      API.put(`/chat/messages/${conversation.userId}/read`, {}, {
+        headers: { Authorization: `Bearer ${getToken()}` }
+      }).then(() => {
+        console.log('Messages marked as read on backend');
+      }).catch(err => {
+        console.error('Error marking messages as read:', err);
+      });
     }
   };
 
@@ -372,10 +358,7 @@ export default function ChatWidget({ currentUserId }) {
   const handleToggle = () => {
     setChatOpen(!chatOpen);
     if (!chatOpen) {
-      // Store that we've opened chat (reduces unread count)
-      localStorage.setItem(`unreadCount_${currentUserId}`, '0');
-      setUnreadCount(0);
-      setHasNewMessage(false);
+      fetchUnreadCount(); // Refresh unread count from backend
       fetchConversations();
     }
   };
