@@ -11,7 +11,7 @@ export default function UploadForm({ onUploaded }) {
   const [fileError, setFileError] = useState('');
   const fileInputRef = useRef(null);
 
-  const allowedExtensions = [".pdf", ".doc", ".docx", ".ppt", ".pptx", ".xls", ".xlsx", ".zip"];
+  const allowedExtensions = [".pdf", ".doc", ".docx", ".ppt", ".pptx", ".xls", ".xlsx", ".zip",".ipynb"];
   const MAX_FILE_BYTES = 20 * 1024 * 1024;
   const getToken = () => localStorage.getItem('token');
 
